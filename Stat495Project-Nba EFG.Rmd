@@ -1,0 +1,194 @@
+---
+title: "Stat495"
+author: "Grant Spangenberg"
+date: "10/17/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+## Load libraries
+library(corrplot)
+library(MLmetrics)
+library(Metrics)
+library(dplyr)
+library(glmnet)
+library(shiny)
+library(rsconnect)
+library(tidyverse)
+```
+
+
+Read files
+```{r cars}
+RegSeason <- read.csv(file = 'player_regseason_features.csv')
+#head(RegSeason)
+
+Playoffs <- read.csv(file = 'playoffs_efgpct_by_player.csv')
+#head(Playoffs)
+
+#match teamID entity and season create harmonic mean 
+#Playoffs$EfgPct %>% length()
+df <-  Playoffs %>% select(EntityId, TeamId, Season, EfgPct) %>% as.data.frame()
+
+RegSeason.test <- merge(RegSeason, df, by = c("EntityId", "TeamId", "Season"), all.y = TRUE)
+
+RegSeason.test$harmonic_mean <- 2/(RegSeason.test$Minutes^-1 + Playoffs$Minutes^-1)
+
+RegSeason.test <- RegSeason.test %>% arrange(Name)
+  
+RegSeason.test1 <-subset(RegSeason.test, select = -c(X,Name, Season, EntityId, RowId, ShortName, TeamAbbreviation, TeamId, Minutes))
+
+
+
+
+##make corr matrix subset chunks of 20 10 different 
+#corrmat <- cor(RegSeason.test1[,1:20], use = "complete.obs")
+#corr1 <- corrplot(corrmat)
+#corr2 <- corrplot(cor(RegSeason.test1[,21:40], use = "complete.obs"))
+#corr3 <- corrplot(cor(RegSeason.test1[,41:60], use = "complete.obs"))
+#corr4 <- corrplot(cor(RegSeason.test1[,61:80], use = "complete.obs"))
+#corr5 <- corrplot(cor(RegSeason.test1[,81:100], use = "complete.obs"))
+#corr6 <- corrplot(cor(RegSeason.test1[,101:120], use = "complete.obs"))
+#corr7 <- corrplot(cor(RegSeason.test1[,121:140], use = "complete.obs"))
+#corr8 <- corrplot(cor(RegSeason.test1[,141:160], use = "complete.obs"))
+#corr9 <- corrplot(cor(RegSeason.test1[,161:180], use = "complete.obs"))
+#corr10 <- corrplot(cor(RegSeason.test1[,181:190], use = "complete.obs"))
+##Scatterplot of regular season efg vs playoffs to see relationship
+#plot(RegSeason.test1$EfgPct.x, RegSeason.test1$EfgPct.y, main="Scatterplot EFG reg vs playoffs",
+  #xlab="Reg Season", ylab="Playoffs")
+```
+
+
+```{r}
+
+```
+
+```{r}
+##Lasso
+nbaX = RegSeason.test1 %>% select( -EfgPct.y) %>% data.matrix()
+#sapply(RegSeason.test1, function(x) sum(is.na(x)))
+main_df <- RegSeason.test1[complete.cases(RegSeason.test1), ]
+nbaX = main_df %>% select( -EfgPct.y) %>% data.matrix()
+lambda = exp(seq(-15,15,length=100))
+lasso_lm = glmnet(nbaX, main_df$EfgPct.y,alpha=1, lamda = lamda)
+#plot(lasso_lm)
+lasso_cv = cv.glmnet(nbaX,main_df$EfgPct.y,alpha=1,lambda = lambda)
+lbestlam = lasso_cv$lambda.min
+#plot(lasso_cv)
+lcoefs = predict(lasso_lm,s=lbestlam,type="coefficient")
+lvars = names(lcoefs[lcoefs[,1]!=0,])[-c(1)]
+regular_lm_lasso = lm(main_df$EfgPct.y ~ . ,data=data.frame(nbaX[,lvars]))
+#summary(regular_lm_lasso)
+
+##Test/Train
+smp_size <- floor(0.75 * nrow(RegSeason.test1))
+set.seed(123)
+train_ind <- sample(seq_len(nrow(RegSeason.test1)), size = smp_size)
+train <- RegSeason.test1[train_ind, ]
+test <- RegSeason.test1[-train_ind, ]
+TrainX = train %>% select( -EfgPct.y) %>% data.matrix()
+TestX = test %>% select( -EfgPct.y) %>% data.matrix()
+#sapply(train, function(x) sum(is.na(x)))
+Train_df <- train[complete.cases(train), ]
+Test_df <- train[complete.cases(test), ]
+TrainX = Train_df %>% select( -EfgPct.y) %>% data.matrix()
+TestX = Test_df %>% select( -EfgPct.y) %>% data.matrix()
+TestX = TestX[complete.cases(TestX), ]
+Train_lasso_lm = glmnet(TrainX, Train_df$EfgPct.y,alpha=1, lamda = lamda)
+#plot(Train_lasso_lm)
+Train_lasso_cv = cv.glmnet(TrainX, Train_df$EfgPct.y,alpha=1,lambda = lambda)
+Train_lbestlam = lasso_cv$lambda.min
+#plot(Train_lasso_cv)
+Train_lcoefs = predict(Train_lasso_lm, s=Train_lbestlam, type="coefficient")
+Train_lvars = names(lcoefs[Train_lcoefs[,1]!=0,])[-c(1)]
+Train_regular_lm_lasso = lm(Train_df$EfgPct.y ~ . ,data=data.frame(Train_df[,Train_lvars]))
+#summary(Train_regular_lm_lasso)
+
+
+modeloutput <- predict(Train_regular_lm_lasso, RegSeason.test1)
+
+
+#modeloutput
+
+
+##filter on name, season 
+# mape
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+```
+
+
+```{r}
+
+tib <- as_tibble(RegSeason.test)
+tib$pred_Efg.y <- modeloutput
+tib$EFG_Regular_Season <- tib$EfgPct.x
+tib$EFG_Post_Season <- tib$EfgPct.y
+tib$EFG_Predicted_Post_Season <- tib$pred_Efg.y
+
+shinyApp(
+    ui = pageWithSidebar(
+        headerPanel("NBA EFG Percentage Playoffs"),
+        sidebarPanel(
+            selectizeInput('var1', 'Select a Player', choices = c("choose" = "", sort(unique(tib$Name)))),
+            selectizeInput('var2', 'Select a Season', choices = c("choose" = "", unique(tib$Season[order(tib$Season)])))
+        ),
+        
+        mainPanel(
+            h4("Effective Field Goal Percentages"),
+            tableOutput("table")
+        )
+    ),
+    
+    server = function(input, output, session) {
+        
+        tab <- reactive({ # <-- Reactive function here
+            
+            tib %>% 
+                filter(Name == input$var1) %>% 
+                filter(Season == input$var2) %>% 
+            ###### PUT THE VARIABLES YOU WANT IN HERE    
+                select(Name, Season, EFG_Regular_Season, EFG_Post_Season, EFG_Predicted_Post_Season)
+            
+        })
+        
+        output$table <- renderTable({ 
+            
+            tab()
+            
+        })
+       
+       
+        
+    },
+    
+    options = list(height = 500)
+    
+)
+
+```
+
+```{r}
+```
+
